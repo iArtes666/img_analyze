@@ -32,15 +32,26 @@ from customtkinter import END
 from threading import Thread
 
 import os
+from random import randrange
+
+import logging
 
 from functools import partial
 
 Image.MAX_IMAGE_PIXELS = 933120000
-set_version = '2.2'
+set_version = '2.5'
 output = os.getcwd() + '\\report.xlsx'
 # default dpi for calculating
 set_dpi = 300
-extensions = ['jpg', 'jpeg', 'tif', 'png']
+extensions = ['jpg', 'jpeg', 'tif', 'tiff', 'png']
+
+# logging config
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(message)s",
+                    handlers=[
+                        logging.FileHandler(os.getcwd() + '\\log.log', 'a'),
+                        logging.StreamHandler()
+                    ])
 
 
 def get_format(size):
@@ -123,8 +134,10 @@ def page_info(path=None):
     try:
         path = filedialog.askdirectory()
         if path == '':
+            logging.info('Задан пустой путь или нажата кнопка отмены')
             messagebox.showwarning('Некорректный путь', 'Укажи ка корректный путь')
             return
+        logging.info('Запущен анализ файлов')
         # files = [file for file in glob.glob(path + '\\**\\*.jpg', recursive=recursive.get())]
         files = [file for file in glob(path + '\\**\\*.*', recursive=recursive.get()) if file.split('.')[-1] in extensions]
         df = pd.DataFrame({'path': files})
@@ -158,6 +171,7 @@ def page_info(path=None):
                 df.loc[i, ['size', 'size1', 'size2', 'color', 'dpi', 'format']] = str(size), pxs[0], pxs[
                     1], img.mode, str(dpi), page_format
             except Exception as e:
+                logging.error(f'\nНе удается прочитать файл {row.path}')
                 df.loc[i, 'comment'] = 'Ошибка чтения файла: ' + str(e)
             counter += 1
             # bar['value'] = counter / cnt * 100
@@ -175,11 +189,21 @@ def page_info(path=None):
         #     #     messagebox.showwarning('Info', 'Обнаружены строки помеченных файлов, которые удалены. Будет удалено ' + str(len(df.file.isin(drop_files))) + ' строк')
         #     #     df.drop(df.loc[df.file.isin(drop_files)].index, inplace=True)
         #     del drop_files
-        df.to_excel(output)
-        messagebox.showinfo('Success', 'Файл создан в ' + output)
+        output_temp = output
+        try:
+            df.to_excel(output_temp)
+        except PermissionError as e:
+            logging.error('Не удалось сохранить отчет: '+ str(e))
+            messagebox.showerror('Не удалось сохранить отчет', 'Нажмите ОК чтобы сохранить с другим именем')
+            logging.warning('Возобновлена попытка сохранить с другим именем...')
+            output_temp = output_temp[:-5] + str(randrange(1, 999999)) + '.xlsx'
+            df.to_excel(output_temp)
+        logging.info(f'Отчет сохранен в {output_temp}')
+        messagebox.showinfo('Success', 'Отчет сохранен в ' + output_temp)
         # pack_to_pdf(df)
     except Exception as e:
-        messagebox.showerror('Error', str(e))
+        logging.critical(str(e))
+        messagebox.showerror('Error', 'Не удалось завершить анализ форматов, информация передана в лог')
 
 
 def pack_to_pdf(df):
@@ -215,20 +239,29 @@ def get_path(line, f_types):
 
 def read_format_file():
     try:
-        print(os.getcwd() + '/format.xlsx')
+        logging.info('Найден файл с параметрами для вычисления, чтение файла...')
         formats = pd.read_excel(os.getcwd() + '/format.xlsx', sheet_name='formats')
         settings = pd.read_excel(os.getcwd() + '/format.xlsx', sheet_name='settings')
         settings = {row[1]['parameter']: row[1]['value'] for row in settings.iterrows()}
     except Exception as e:
+        logging.critical(str(e))
         messagebox.showerror('Критическая ошибка', 'Файл "format" старой версии, замените файл!\n'
-                                                   'При нажатии ОК будет осуществлен выход из программы\n' + str(e))
+                                                   'При нажатии ОК будет осуществлен выход из программы\n')
         exit(-1)
+    logging.info('Параметры для вычисления успешно переданы')
     return formats, settings
 
 
+logging.info(f'Запуск программы. Версия: {set_version}')
 window = CTk()
 window.title(f'Анализ форматов файлов. Версия: {set_version}')
 window.geometry('300x215')
+
+logging.info(f'Доступные форматы изображений (в будущем): Fully (BLP, BMP, DDS, DIB, EPS), Load (GIF, ICNS, ICO, IM, '
+             f'JPEG, JPEG 2000, MSP, PCX, PNG, APNG, PPM, SGI, SPIDER, TGA, TIFF, WebP, XBM), Read (CUR, DCX, FITS, '
+             f'FLI, FLC, FPX, FTEX, GBR, GD), Open (IMT, IPTC/NAA, MCIDAS, MIC, MPO, PCD, PIXAR, PSD, QOI, SUN, WAL, '
+             f'WMF, EMF, XPM)')
+logging.info(f'Поддерживаемые типы изображений: {str(extensions)}')
 
 CTkLabel(window, text='Необходимо выбрать коневую папку с пачками').grid(column=0, row=0)
 btn_start = CTkButton(window, text='Выбрать папку с пачками', command=start)
@@ -250,6 +283,8 @@ if os.path.exists(os.getcwd() + '/format.xlsx'):
     dmitry_spec = BooleanVar(value=True)
     dmitry_state = 'normal'
 else:
+    logging.warning('Файл с параметрами не найден! Используется стандартный функционал с альтернативным методом '
+                    'вычисления')
     dmitry_spec = BooleanVar(value=False)
     dmitry_state = 'disabled'
 CTkCheckBox(window, text='Расчет по алгоритму Дмитрия', variable=dmitry_spec, state=dmitry_state).grid(column=0, row=5, sticky="nsew", padx=5)
@@ -275,5 +310,8 @@ bar = CTkProgressBar(window)
 # bar['value'] = 0
 bar.set(0, 100)
 bar.grid(column=0, row=8)
+
+logging.info(f'Установлен DPI {set_dpi}')
+logging.info('Программа успешно запущена')
 
 window.mainloop()
