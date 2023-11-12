@@ -39,7 +39,7 @@ import logging
 from functools import partial
 
 Image.MAX_IMAGE_PIXELS = 933120000
-set_version = '2.5'
+set_version = '2.6'
 output = os.getcwd() + '\\report.xlsx'
 # default dpi for calculating
 set_dpi = 300
@@ -237,12 +237,26 @@ def get_path(line, f_types):
     return path
 
 
+def rebuild_format(df, dpi):
+    logging.info(f'Эталон по размерам в пикселях приведен к dpi {dpi}')
+    # dff = df.loc[df['variable'] == 'abt']
+    for row in df.iterrows():
+        for size in ('h', 'w', 'h_min', 'h_max', 'w_min', 'w_max'):
+            df.loc[row[0], size] = round(row[1][size] / set_dpi * dpi) if row[1][size] not in (0, 99999999) else row[1][size]
+    df.to_excel(os.getcwd() + '\\formats_temp.xlsx')
+    logging.info('Приведенный эталон записан в корневую папку с приложением (formats_temp.xlsx)')
+    return df
+
+
 def read_format_file():
     try:
         logging.info('Найден файл с параметрами для вычисления, чтение файла...')
         formats = pd.read_excel(os.getcwd() + '/format.xlsx', sheet_name='formats')
+        formats.fillna(0, inplace=True)
         settings = pd.read_excel(os.getcwd() + '/format.xlsx', sheet_name='settings')
         settings = {row[1]['parameter']: row[1]['value'] for row in settings.iterrows()}
+        if settings['dpi'] != set_dpi:
+            formats = rebuild_format(formats, settings['dpi']).copy()
     except Exception as e:
         logging.critical(str(e))
         messagebox.showerror('Критическая ошибка', 'Файл "format" старой версии, замените файл!\n'
